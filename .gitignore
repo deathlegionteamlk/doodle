@@ -1,0 +1,73 @@
+# ============================================================================
+# doodle .gitignore — keeps secrets, DB, and user uploads out of git
+# ============================================================================
+
+# ---- Secrets & install state ----
+.installed
+.v2_migrated
+.env
+.env.local
+.env.*.local
+*.secret
+config/local.php
+
+# ---- Database files (SQLite) ----
+database/*.sqlite
+database/*.sqlite-journal
+database/*.sqlite-wal
+database/*.sqlite-shm
+database/*.db
+database/*.db-journal
+
+# ---- User-uploaded content (keep directory structure, ignore contents) ----
+public/uploads/avatars/*
+public/uploads/covers/*
+public/uploads/lessons/*
+public/uploads/submissions/*
+!public/uploads/avatars/.gitkeep
+!public/uploads/covers/.gitkeep
+!public/uploads/lessons/.gitkeep
+!public/uploads/submissions/.gitkeep
+!public/uploads/index.php
+
+# ---- Logs & temp files ----
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.directory
+
+# ---- Editor / IDE ----
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+nbproject/
+
+# ---- Composer / dependencies (if you add any later) ----
+vendor/
+composer.lock
+
+# ---- Node (if you add a build step later) ----
+node_modules/
+package-lock.json
+
+# ---- Build artifacts ----
+*.zip
+*.tar.gz
+*.phar
+build/
+dist/
+
+# ---- Coverage / test artifacts ----
+coverage/
+.phpunit.result.cache

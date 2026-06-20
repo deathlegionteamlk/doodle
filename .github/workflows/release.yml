@@ -1,0 +1,157 @@
+# ============================================================================
+# doodle — Auto-release workflow
+# ============================================================================
+# Triggers when you push a tag matching v* (e.g., v0.1-beta, v0.2, v1.0).
+# Builds a release zip and creates a GitHub Release with the zip attached.
+#
+# To use:
+#   git tag v0.2-beta
+#   git push origin v0.2-beta
+#
+# The workflow does the rest. No token needed — it uses the built-in
+# GITHUB_TOKEN automatically.
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.2-beta)'
+        required: true
+        default: 'v0.2-beta'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag name
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, pdo_sqlite, mbstring, xml, fileinfo
+          coverage: none
+
+      - name: Verify PHP syntax
+        run: |
+          echo "Linting all PHP files..."
+          find . -name "*.php" -not -path "./.github/*" | while read -r f; do
+            php -l "$f" || exit 1
+          done
+          echo "✓ All PHP files pass lint."
+
+      - name: Verify schema installs cleanly
+        run: |
+          php -r "
+          require 'config/config.php';
+          require 'config/database.php';
+          require 'app/helpers/functions.php';
+          \$db = new PDO('sqlite:' . sys_get_temp_dir() . '/doodle_test.sqlite');
+          \$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+          require 'database/schema.php';
+          require 'database/schema_v2.php';
+          Schema::install(\$db, 'sqlite');
+          SchemaV2::install(\$db);
+          Schema::seed(\$db);
+          \$tables = \$db->query('SELECT name FROM sqlite_master WHERE type=\"table\"')->fetchAll(PDO::FETCH_COLUMN);
+          echo 'Tables created: ' . count(\$tables) . PHP_EOL;
+          if (count(\$tables) < 40) { exit(1); }
+          echo '✓ Schema installs cleanly.' . PHP_EOL;
+          "
+
+      - name: Build release zip
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          ZIP_NAME="doodle-${TAG}.zip"
+          echo "Building $ZIP_NAME..."
+
+          # Create a clean build directory
+          mkdir -p build/doodle
+          rsync -av --exclude='.git' \
+                       --exclude='.github' \
+                       --exclude='.installed' \
+                       --exclude='.v2_migrated' \
+                       --exclude='database/*.sqlite*' \
+                       --exclude='public/uploads/avatars/*' \
+                       --exclude='public/uploads/covers/*' \
+                       --exclude='public/uploads/lessons/*' \
+                       --exclude='public/uploads/submissions/*' \
+                       --exclude='node_modules' \
+                       --exclude='vendor' \
+                       --exclude='*.log' \
+                       --exclude='build' \
+                       --exclude='*.zip' \
+                       ./ build/doodle/
+
+          cd build
+          zip -r "../$ZIP_NAME" doodle/ -q
+          cd ..
+
+          echo "✓ Built $ZIP_NAME ($(du -h "$ZIP_NAME" | cut -f1))"
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
+
+          # Generate checksums
+          sha256sum "$ZIP_NAME" > "$ZIP_NAME.sha256"
+          sha512sum "$ZIP_NAME" > "$ZIP_NAME.sha512"
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          if [[ -f "CHANGELOG.md" ]]; then
+            # Extract the section for this release
+            NOTES=$(awk "/^## \[$TAG\]/{flag=1} /^## \[/ && !/^## \[$TAG\]/{if(flag) exit} flag" CHANGELOG.md)
+            if [[ -z "$NOTES" ]]; then
+              NOTES=$(head -80 CHANGELOG.md)
+            fi
+          else
+            NOTES="doodle $TAG — open-source LMS with AI assistant. By Death Legion Team. GPL-3.0."
+          fi
+          # Write to file to preserve multiline
+          echo "$NOTES" > /tmp/release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: doodle ${{ steps.tag.outputs.name }}
+          body_path: /tmp/release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.name, 'beta') || contains(steps.tag.outputs.name, 'alpha') || contains(steps.tag.outputs.name, 'rc') }}
+          files: |
+            doodle-*.zip
+            doodle-*.zip.sha256
+            doodle-*.zip.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### Release Published ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ steps.tag.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Files attached:**" >> $GITHUB_STEP_SUMMARY
+          ls -la doodle-*.zip doodle-*.sha256 doodle-*.sha512 2>/dev/null | awk '{print "- `" $9 "` (" $5 " bytes)" }' >> $GITHUB_STEP_SUMMARY
