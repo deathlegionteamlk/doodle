@@ -344,3 +344,7 @@ Built with:
 - Material Icons
 
 > *"Moodle-like, but better — with AI built in, and entirely yours."*
+
+<!-- DL Code Badge -->
+![Status](https://img.shields.io/badge/status-active-success?style=flat-square)
+
